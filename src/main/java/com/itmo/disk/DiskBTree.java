@@ -12,10 +12,9 @@ import java.nio.file.Path;
  */
 public final class DiskBTree implements Closeable {
 
-    private final int degree;                 // t
-    private final int maxKeys;                // 2t-1
-    private final int minKeys;                // t-1
-    private final int maxChildren;            // 2t
+    private final int degree;
+    private final int maxKeys;
+    private final int minKeys;
 
     private final DiskPageManager pageManager;
 
@@ -32,7 +31,8 @@ public final class DiskBTree implements Closeable {
         this.degree = pageManager.getDegree();
         this.maxKeys = 2 * degree - 1;
         this.minKeys = degree - 1;
-        this.maxChildren = 2 * degree;
+        // 2t
+        int maxChildren = 2 * degree;
 
         // Ensure root exists
         if (pageManager.getRootPageId() < 0) {
