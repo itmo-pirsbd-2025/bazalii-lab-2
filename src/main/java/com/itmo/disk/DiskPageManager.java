@@ -190,14 +190,14 @@ final class DiskPageManager implements Closeable {
             return cached;
         }
 
-        var n = readNode(pageId);
-        putToCache(n);
+        var node = readNode(pageId);
+        putToCache(node);
 
-        return n;
+        return node;
     }
 
-    private void putToCache(DiskNode n) {
-        cache.put(n.pageId, n);
+    private void putToCache(DiskNode node) {
+        cache.put(node.pageId, node);
     }
 
     private DiskNode readNode(int pageId) throws IOException {
@@ -212,8 +212,8 @@ final class DiskPageManager implements Closeable {
         buffer.flip();
 
         var leaf = buffer.get();
-        buffer.get(); // pad
-        buffer.getShort(); // pad
+        buffer.get();
+        buffer.getShort();
         node.isLeaf = leaf != 0;
         node.keyCount = buffer.getInt();
 

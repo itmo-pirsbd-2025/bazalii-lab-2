@@ -26,10 +26,5 @@ tasks.test {
 }
 
 jmh {
-    warmupIterations.set(5)
-    iterations.set(10)
-    fork.set(1)
-    timeUnit.set("ms")
-
     includes.set(listOf(".*BTree.*"))
 }

@@ -31,37 +31,34 @@ public final class DiskBTree implements Closeable {
         this.degree = pageManager.getDegree();
         this.maxKeys = 2 * degree - 1;
         this.minKeys = degree - 1;
-        // 2t
-        int maxChildren = 2 * degree;
 
-        // Ensure root exists
         if (pageManager.getRootPageId() < 0) {
             var root = pageManager.allocateNodePage();
-            var n = pageManager.get(root);
-            n.isLeaf = true;
-            n.keyCount = 0;
-            n.markDirty();
+            var node = pageManager.get(root);
+            node.isLeaf = true;
+            node.keyCount = 0;
+            node.markDirty();
             pageManager.setRootPageId(root);
             pageManager.flush();
         }
     }
 
-    public int degree() {
+    public int getDegree() {
         return degree;
     }
 
     public Entry<Integer, Integer> find(int key) throws IOException {
         var pageId = pageManager.getRootPageId();
         while (pageId >= 0) {
-            var n = pageManager.get(pageId);
-            var i = n.findKeyIndex(key);
-            if (i < n.keyCount && n.keys[i] == key) {
-                return new Entry<>(key, n.values[i]);
+            var node = pageManager.get(pageId);
+            var index = node.findKeyIndex(key);
+            if (index < node.keyCount && node.keys[index] == key) {
+                return new Entry<>(key, node.values[index]);
             }
-            if (n.isLeaf) {
+            if (node.isLeaf) {
                 return null;
             }
-            pageId = n.children[i];
+            pageId = node.children[index];
         }
         return null;
     }
@@ -80,7 +77,7 @@ public final class DiskBTree implements Closeable {
 
             pageManager.setRootPageId(allocatedNodePageId);
 
-            splitChild(allocatedNodePageId, 0);           // splits old root
+            splitChild(allocatedNodePageId, 0);
             insertNonFull(allocatedNodePageId, key, value);
         } else {
             insertNonFull(rootId, key, value);
@@ -189,61 +186,61 @@ public final class DiskBTree implements Closeable {
     }
 
     private void deleteInternal(int nodeId, int key) throws IOException {
-        var x = pageManager.get(nodeId);
-        var idx = x.findKeyIndex(key);
+        var node = pageManager.get(nodeId);
+        var index = node.findKeyIndex(key);
 
         // Case 1: key in this node
-        if (idx < x.keyCount && x.keys[idx] == key) {
-            if (x.isLeaf) {
+        if (index < node.keyCount && node.keys[index] == key) {
+            if (node.isLeaf) {
                 // Remove from leaf
-                removeKeyAt(x, idx);
-                x.markDirty();
+                removeKeyAt(node, index);
+                node.markDirty();
                 return;
             }
 
             // Internal node: replace by predecessor or successor
-            var leftChildId = x.children[idx];
-            var rightChildId = x.children[idx + 1];
+            var leftChildId = node.children[index];
+            var rightChildId = node.children[index + 1];
             var left = pageManager.get(leftChildId);
             var right = pageManager.get(rightChildId);
 
             if (left.keyCount > minKeys) {
                 // predecessor
                 var pred = maxInSubtree(leftChildId);
-                x.keys[idx] = pred.key;
-                x.values[idx] = pred.value;
-                x.markDirty();
+                node.keys[index] = pred.key;
+                node.values[index] = pred.value;
+                node.markDirty();
                 deleteInternal(leftChildId, pred.key);
                 return;
             } else if (right.keyCount > minKeys) {
                 // successor
-                var succ = minInSubtree(rightChildId);
-                x.keys[idx] = succ.key;
-                x.values[idx] = succ.value;
-                x.markDirty();
-                deleteInternal(rightChildId, succ.key);
+                var pair = minInSubtree(rightChildId);
+                node.keys[index] = pair.key;
+                node.values[index] = pair.value;
+                node.markDirty();
+                deleteInternal(rightChildId, pair.key);
                 return;
             } else {
                 // merge key + right into left, then delete from merged
-                mergeChildren(nodeId, idx);
+                mergeChildren(nodeId, index);
                 deleteInternal(leftChildId, key);
                 return;
             }
         }
 
         // Case 2: key not in this node
-        if (x.isLeaf) {
-            return; // not found
+        if (node.isLeaf) {
+            return;
         }
 
-        var childIndex = x.findChildIndex(key);
-        var childId = x.children[childIndex];
+        var childIndex = node.findChildIndex(key);
+        var childId = node.children[childIndex];
         var child = pageManager.get(childId);
 
         // Ensure child has at least t keys before descending
         if (child.keyCount == minKeys) {
-            var leftSiblingId = (childIndex > 0) ? x.children[childIndex - 1] : -1;
-            var rightSiblingId = (childIndex < x.keyCount) ? x.children[childIndex + 1] : -1;
+            var leftSiblingId = (childIndex > 0) ? node.children[childIndex - 1] : -1;
+            var rightSiblingId = (childIndex < node.keyCount) ? node.children[childIndex + 1] : -1;
 
             if (leftSiblingId != -1 && pageManager.get(leftSiblingId).keyCount > minKeys) {
                 borrowFromLeft(nodeId, childIndex);
@@ -257,7 +254,7 @@ public final class DiskBTree implements Closeable {
                 } else {
                     // merge into left sibling
                     mergeChildren(nodeId, childIndex - 1);
-                    childId = x.children[childIndex - 1];
+                    childId = node.children[childIndex - 1];
                 }
             }
         }
@@ -296,20 +293,17 @@ public final class DiskBTree implements Closeable {
         }
     }
 
-    /**
-     * Merge child[index] + separator key + child[index+1] into child[index].
-     */
     private void mergeChildren(int parentId, int index) throws IOException {
-        var p = pageManager.get(parentId);
-        var leftId = p.children[index];
-        var rightId = p.children[index + 1];
+        var node = pageManager.get(parentId);
+        var leftId = node.children[index];
+        var rightId = node.children[index + 1];
 
         var left = pageManager.get(leftId);
         var right = pageManager.get(rightId);
 
         // left gets separator key
-        left.keys[left.keyCount] = p.keys[index];
-        left.values[left.keyCount] = p.values[index];
+        left.keys[left.keyCount] = node.keys[index];
+        left.values[left.keyCount] = node.values[index];
         left.keyCount++;
 
         // copy right keys
@@ -321,31 +315,32 @@ public final class DiskBTree implements Closeable {
 
         // copy right children if needed
         if (!left.isLeaf) {
-            for (var j = 0; j <= right.keyCount; j++) {
-                left.children[(degree) + j] = right.children[j]; // safe because left had minKeys and right had minKeys
+            // safe because left had minKeys and right had minKeys
+            if (right.keyCount + 1 >= 0) {
+                System.arraycopy(right.children, 0, left.children, degree, right.keyCount + 1);
             }
         }
 
         // remove key from parent + shift
-        for (var j = index; j < p.keyCount - 1; j++) {
-            p.keys[j] = p.keys[j + 1];
-            p.values[j] = p.values[j + 1];
+        for (var j = index; j < node.keyCount - 1; j++) {
+            node.keys[j] = node.keys[j + 1];
+            node.values[j] = node.values[j + 1];
         }
-        for (var j = index + 1; j < p.keyCount; j++) {
-            p.children[j] = p.children[j + 1];
+        for (var j = index + 1; j < node.keyCount; j++) {
+            node.children[j] = node.children[j + 1];
         }
-        p.keyCount--;
+        node.keyCount--;
 
         left.markDirty();
-        p.markDirty();
+        node.markDirty();
 
         pageManager.freeNodePage(rightId);
     }
 
     private void borrowFromLeft(int parentId, int childIndex) throws IOException {
-        var p = pageManager.get(parentId);
-        var childId = p.children[childIndex];
-        var leftId = p.children[childIndex - 1];
+        var parent = pageManager.get(parentId);
+        var childId = parent.children[childIndex];
+        var leftId = parent.children[childIndex - 1];
 
         var child = pageManager.get(childId);
         var left = pageManager.get(leftId);
@@ -362,8 +357,8 @@ public final class DiskBTree implements Closeable {
         }
 
         // bring separator from parent down to child[0]
-        child.keys[0] = p.keys[childIndex - 1];
-        child.values[0] = p.values[childIndex - 1];
+        child.keys[0] = parent.keys[childIndex - 1];
+        child.values[0] = parent.values[childIndex - 1];
 
         // move left's last child if needed
         if (!child.isLeaf) {
@@ -371,36 +366,36 @@ public final class DiskBTree implements Closeable {
         }
 
         // move left's last key up to parent
-        p.keys[childIndex - 1] = left.keys[left.keyCount - 1];
-        p.values[childIndex - 1] = left.values[left.keyCount - 1];
+        parent.keys[childIndex - 1] = left.keys[left.keyCount - 1];
+        parent.values[childIndex - 1] = left.values[left.keyCount - 1];
 
         left.keyCount--;
         child.keyCount++;
 
         left.markDirty();
         child.markDirty();
-        p.markDirty();
+        parent.markDirty();
     }
 
     private void borrowFromRight(int parentId, int childIndex) throws IOException {
-        var p = pageManager.get(parentId);
-        var childId = p.children[childIndex];
-        var rightId = p.children[childIndex + 1];
+        var parent = pageManager.get(parentId);
+        var childId = parent.children[childIndex];
+        var rightId = parent.children[childIndex + 1];
 
         var child = pageManager.get(childId);
         var right = pageManager.get(rightId);
 
         // bring separator from parent down to child end
-        child.keys[child.keyCount] = p.keys[childIndex];
-        child.values[child.keyCount] = p.values[childIndex];
+        child.keys[child.keyCount] = parent.keys[childIndex];
+        child.values[child.keyCount] = parent.values[childIndex];
 
         if (!child.isLeaf) {
             child.children[child.keyCount + 1] = right.children[0];
         }
 
         // move right first key up to parent
-        p.keys[childIndex] = right.keys[0];
-        p.values[childIndex] = right.values[0];
+        parent.keys[childIndex] = right.keys[0];
+        parent.values[childIndex] = right.values[0];
 
         // shift right keys/children left
         for (var i = 0; i < right.keyCount - 1; i++) {
@@ -418,7 +413,7 @@ public final class DiskBTree implements Closeable {
 
         right.markDirty();
         child.markDirty();
-        p.markDirty();
+        parent.markDirty();
     }
 
     @Override
